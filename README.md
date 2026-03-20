@@ -1,4 +1,4 @@
-# OpenBranch
+# 🌿 OpenBranch
 
 **Expand your chat. Merge your ideas.**
 
