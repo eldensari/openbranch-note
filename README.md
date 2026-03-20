@@ -29,6 +29,10 @@ npm run dev
 
 Open [http://localhost:5173](http://localhost:5173).
 
+## Contact
+
+Built by [Elden Sari](https://github.com/eldensari) — reach out at eldensari@proton.me
+
 ## License
 
 MIT
