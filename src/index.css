@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+/* Hide scrollbar in graph panel */
+.graph-scroll::-webkit-scrollbar {
+  display: none;
+}
+.graph-scroll {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
