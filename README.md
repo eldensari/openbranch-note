@@ -4,7 +4,7 @@
 
 A nonlinear chat app for LLM conversations. Branch to explore, merge to synthesize.
 
-![screenshot](screenshot.png)
+![OpenBranch screenshot](https://openbranch.app/screenshot.png)
 
 ## Features
 
