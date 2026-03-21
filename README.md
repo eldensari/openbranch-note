@@ -1,8 +1,8 @@
 # 🌿 OpenBranch
 
-**Expand your chat. Merge your ideas.**
+**Branch to explore in your chat**
 
-A nonlinear chat app for LLM conversations. Branch to explore, merge to synthesize.
+A nonlinear chat app for LLM conversations. 
 
 ![OpenBranch screenshot](https://openbranch.app/screenshot.png)
 
