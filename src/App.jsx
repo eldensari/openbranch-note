@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import storage from "./lib/storage";
 import { callLLM, detectProvider, submitWaitlist } from "./lib/llm";
 import herbIcon from "./assets/herb.svg";
+import seedMobyDick from "./seed-moby-dick";
 
 /* ═══════ THEME ═══════ */
 const LIGHT = {
@@ -103,57 +104,6 @@ const GitHubIcon = () => (
     <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/>
   </svg>
 );
-
-/* ═══════ SEED / DUMMY DATA ═══════ */
-function seedDummyData() {
-  // Don't overwrite if user already has conversations
-  const existing = storage.list("conv:");
-  if (existing?.keys?.length) return;
-
-  const ts = Date.now();
-
-  // ─── Conversation 1: "Why do LLM conversations need branches?" ───
-  // main: c1 → c2 → c3, branch-1: c2→c4 (edit from c2), merge: c5 merges c3+c4
-  const c1 = { id: "demo_c1", parentId: null, mergeIds: [], branch: "main", ts: ts - 50000,
-    prompt: "Why do LLM conversations need branches?",
-    response: "Traditional chat interfaces are **linear** — each message follows the last in a single thread. But thinking isn't linear. When you explore an idea with an LLM, you often want to:\n\n- Try a different angle on the same question\n- Compare two approaches side by side\n- Go back to an earlier point and explore a \"what if\"\n\nBranches let you do all of this without losing context. Think of it like `git` for your conversations — every exchange is a commit, and you can branch, explore, and come back." };
-  const c2 = { id: "demo_c2", parentId: "demo_c1", mergeIds: [], branch: "main", ts: ts - 40000,
-    prompt: "How is this different from just opening a new chat?",
-    response: "Great question. Opening a new chat **loses all context**. The LLM starts from scratch.\n\nWith branches:\n1. The new branch **inherits the full conversation history** up to the branch point\n2. You can **see both paths** in the graph and compare them\n3. You can **merge** insights from different branches back together\n\nIt's the difference between copying a file and using version control. One gives you isolation, the other gives you *structure*." };
-  const c3 = { id: "demo_c3", parentId: "demo_c2", mergeIds: [], branch: "main", ts: ts - 30000,
-    prompt: "What's a real-world example of when I'd use this?",
-    response: "Imagine you're planning a startup. You ask the LLM for advice on your go-to-market strategy.\n\n- **Branch A**: You explore a B2B approach\n- **Branch B**: You explore a B2C approach\n\nEach branch develops detailed plans with full context. Then you **merge** them: \"Compare these two strategies and recommend which is better for a 2-person team with $50k budget.\"\n\nThe LLM sees both full conversations and gives you a synthesized answer. That's something a linear chat simply can't do." };
-  const c4 = { id: "demo_c4", parentId: "demo_c1", mergeIds: [], branch: "branch-1", ts: ts - 35000,
-    prompt: "What are the technical challenges of implementing branching?",
-    response: "The main challenges are:\n\n### Data Model\nYou need a **DAG** (directed acyclic graph), not a list. Each message has a parent pointer, and branches share ancestry.\n\n### UI/UX\nShowing a graph without overwhelming the user is hard. You need:\n- A clean graph visualization\n- Easy branch switching\n- Clear indicators of which branch you're on\n\n### Context Window\nWhen sending to the LLM, you need to reconstruct the right thread — following parent pointers back to the root, not just sending everything.\n\n### Merge\nMerging is conceptually simple (show both threads to the LLM) but needs careful prompt engineering to produce useful synthesis." };
-  const c5 = { id: "demo_c5", parentId: "demo_c3", mergeIds: ["demo_c4"], branch: "main", ts: ts - 20000,
-    prompt: "Synthesize the use-case perspective and the technical challenges into a summary.",
-    response: "## Branching in LLM Conversations: Summary\n\n**Why it matters**: Linear chat forces sequential thinking. Branching lets you explore multiple directions from any point, compare approaches, and merge insights — like version control for thought.\n\n**Key use cases**:\n- Comparing strategies (B2B vs B2C, Rust vs Go)\n- Exploring \"what if\" scenarios without losing context\n- Collaborative reasoning across different angles\n\n**Technical requirements**:\n- DAG-based data model (not a list)\n- Graph UI that's intuitive, not overwhelming\n- Smart context reconstruction for LLM calls\n- Merge prompting that synthesizes multiple threads\n\n**Bottom line**: The gap between how we think and how chat works is the opportunity. Branching closes that gap." };
-
-  const conv1 = {
-    id: "conv:demo1", title: "Why do LLM conversations need branches?",
-    commits: [c1, c2, c3, c4, c5], headId: "demo_c5", branch: "main",
-    parentRef: null, u: new Date(ts - 20000).toISOString(),
-  };
-
-  // ─── Conversation 2: forked from conv1 c2 via "new" ───
-  const c6 = { id: "demo_c6", parentId: null, mergeIds: [], branch: "main", ts: ts - 15000,
-    prompt: "What is the best way to learn a new language?",
-    response: "It depends on your goals and learning style, but here's a framework that works well:\n\n### 1. Immersion First\nSurround yourself with the language — music, podcasts, YouTube. Even passive listening builds neural pathways.\n\n### 2. Structured Basics\nLearn the **100 most common words** and basic grammar. Apps like Anki (spaced repetition) are great for this.\n\n### 3. Speak Early\nDon't wait until you're \"ready.\" Find language exchange partners or tutors. Making mistakes is the fastest feedback loop.\n\n### 4. Content You Enjoy\nRead books, watch shows, play games in the target language. Enjoyment = consistency = progress.\n\nThe key insight: **consistency beats intensity**. 20 minutes daily > 3 hours on weekends." };
-  const c7 = { id: "demo_c7", parentId: "demo_c6", mergeIds: [], branch: "main", ts: ts - 10000,
-    prompt: "How long does it typically take to become conversational?",
-    response: "The **FSI** (Foreign Service Institute) has rough estimates:\n\n- **Category I** (Spanish, French, Italian): ~600 hours → 6-8 months at 2-3 hrs/day\n- **Category II** (German, Indonesian): ~900 hours → 9-12 months\n- **Category III** (Russian, Hindi): ~1,100 hours → 12-18 months\n- **Category IV** (Chinese, Japanese, Korean, Arabic): ~2,200 hours → 2-3 years\n\nThese are for English speakers reaching \"professional working proficiency.\" Conversational fluency can come much sooner — often **half** these times — if you:\n- Focus on speaking over reading\n- Use the language daily in real contexts\n- Accept imperfection and communicate anyway\n\n**Realistic target**: Most people can hold basic conversations in a Category I language within **3-4 months** of consistent daily practice." };
-
-  const conv2 = {
-    id: "conv:demo2", title: "What is the best way to learn a new language?",
-    commits: [c6, c7], headId: "demo_c7", branch: "main",
-    parentRef: { convId: "conv:demo1", commitId: "demo_c2", convTitle: "Why do LLM conversations need branches?", promptSummary: "How is this different from jus.." },
-    u: new Date(ts - 10000).toISOString(),
-  };
-
-  storage.set("conv:demo1", JSON.stringify(conv1));
-  storage.set("conv:demo2", JSON.stringify(conv2));
-}
 
 /* ═══════ DATA ═══════ */
 let cc = 100; // start high to avoid conflicts with demo IDs
@@ -366,7 +316,7 @@ export default function App() {
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
   const [pending, setPending] = useState(null);
-  const [graph, setGraph] = useState(false);
+  const [graph, setGraph] = useState(true);
   const [mm, setMm] = useState(false);
   const [sel, setSel] = useState([]);
   const [editId, setEditId] = useState(null);
@@ -389,14 +339,21 @@ export default function App() {
   // Persist theme
   useEffect(() => { storage.set("theme", dark ? "dark" : "light"); }, [dark]);
 
-  // Seed dummy data on first visit, then load convs
+  // Seed data on first visit, then load convs
   useEffect(() => {
-    seedDummyData();
+    seedMobyDick();
     const r = storage.list("conv:");
     if (r?.keys?.length) {
       const cs = [];
       for (const k of r.keys) { const p = storage.get(k); if (p?.value) { try { cs.push(JSON.parse(p.value)); } catch {} } }
-      setConvs(cs.sort((a, b) => (b.u || "").localeCompare(a.u || "")));
+      const sorted = cs.sort((a, b) => (b.u || "").localeCompare(a.u || ""));
+      setConvs(sorted);
+      // Auto-open Moby Dick on first visit (no conv selected yet)
+      const moby = sorted.find(c => c.id === "conv:moby_dick");
+      if (moby && !convId) {
+        load(moby);
+        setGraph(true);
+      }
     }
   }, []);
 
