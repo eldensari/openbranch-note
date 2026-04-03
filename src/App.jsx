@@ -518,9 +518,9 @@ function TimelineView({ date, label, convs, onGoToConv, onBack, t }) {
                         {c.lastPrompt}
                       </div>
                       <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
-                        <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "#E1F5EE", color: "#0F6E56" }}>{c.names.length}b</span>
-                        {c.mergeCount > 0 && <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "#FAEEDA", color: "#854F0B" }}>{c.mergeCount}m</span>}
-                        <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "transparent", border: "0.5px solid " + t.border, color: t.textSub }}>{c.commitCount}c</span>
+                        <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "#E1F5EE", color: "#0F6E56" }}>{c.names.length} {c.names.length === 1 ? "branch" : "branches"}</span>
+                        {c.mergeCount > 0 && <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "#FAEEDA", color: "#854F0B" }}>{c.mergeCount} {c.mergeCount === 1 ? "merge" : "merges"}</span>}
+                        <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "transparent", border: "0.5px solid " + t.border, color: t.textSub }}>{c.commitCount} {c.commitCount === 1 ? "commit" : "commits"}</span>
                       </div>
                     </div>
                   </div>
