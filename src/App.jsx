@@ -181,43 +181,6 @@ function detectSessions(conv, targetDate) {
   return sessions;
 }
 
-/* ═══════ MINI GRAPH ═══════ */
-function renderMiniGraph(commits, branchNames) {
-  if (!commits.length) return null;
-  const maxNodes = 8;
-  const sorted = [...commits].sort((a, b) => a.ts - b.ts);
-  const shown = sorted.length > maxNodes ? sorted.slice(0, maxNodes) : sorted;
-  const names = branchNames.length ? branchNames : ["main"];
-  const nR = 2, lW = 8, rH = 6, pL = 4;
-  const h = shown.length * rH + 4;
-  const w = 48;
-
-  const pos = {};
-  shown.forEach((cm, i) => {
-    const lane = Math.max(0, names.indexOf(cm.branch));
-    pos[cm.id] = { x: pL + lane * lW + nR, y: 2 + i * rH + nR };
-  });
-
-  return (
-    <svg width={w} height={Math.min(h, 28)} viewBox={`0 0 ${w} ${Math.min(h, 28)}`} style={{ display: "block", flexShrink: 0 }}>
-      {shown.map(cm => {
-        const to = pos[cm.id]; if (!to) return null;
-        if (!cm.parentId) return null;
-        const fr = pos[cm.parentId]; if (!fr) return null;
-        const col = bCol(names, cm.branch);
-        if (fr.x === to.x) return <line key={"e" + cm.id} x1={fr.x} y1={fr.y + nR} x2={to.x} y2={to.y - nR} stroke={col} strokeWidth="1" opacity="0.4" />;
-        const mY = (fr.y + to.y) / 2;
-        return <path key={"e" + cm.id} d={`M${fr.x} ${fr.y + nR} C${fr.x} ${mY} ${to.x} ${mY} ${to.x} ${to.y - nR}`} fill="none" stroke={col} strokeWidth="1" opacity="0.4" />;
-      })}
-      {shown.map(cm => {
-        const p = pos[cm.id]; if (!p) return null;
-        const col = bCol(names, cm.branch);
-        const filled = !!cm.response;
-        return <circle key={"n" + cm.id} cx={p.x} cy={p.y} r={nR} fill={filled ? col : "none"} stroke={col} strokeWidth="1" />;
-      })}
-    </svg>
-  );
-}
 
 /* ═══════ GIT GRAPH ═══════ */
 function Graph({ commits, headId, activeBranch, names, onCheckout, onEdit, onNew, onDelete, mergeMode, selected, onToggleSel, parentRef, onGoToParent, childRefs, onGoToChild, hoveredCid, panelW, t, readOnly }) {
@@ -411,6 +374,8 @@ function TimelineView({ date, label, convs, onGoToConv, onBack, t }) {
     const color = BC[colorIdx % BC.length];
     const names = bNames(cv.commits || []);
     const lastPrompt = (cv.commits || []).filter(c => c.prompt).slice(-1)[0]?.prompt || "";
+    const mergeCount = (cv.commits || []).filter(c => (c.mergeIds || []).length > 0).length;
+    const commitCount = (cv.commits || []).length;
     sessions.forEach(s => {
       cards.push({
         key: cv.id + "_" + s.startTime,
@@ -421,6 +386,8 @@ function TimelineView({ date, label, convs, onGoToConv, onBack, t }) {
         color,
         names,
         lastPrompt,
+        mergeCount,
+        commitCount,
       });
     });
     colorIdx++;
@@ -448,7 +415,7 @@ function TimelineView({ date, label, convs, onGoToConv, onBack, t }) {
   }, [firstActivityHour]);
 
   // Position cards
-  const PRIMARY_H = 56, CONTINUED_H = 34;
+  const PRIMARY_H = 72, CONTINUED_H = 34;
   const positioned = cards.map(c => {
     const d = new Date(c.startTime);
     const minutesSinceStart = d.getHours() * 60 + d.getMinutes();
@@ -536,24 +503,24 @@ function TimelineView({ date, label, convs, onGoToConv, onBack, t }) {
                       cursor: "pointer",
                     }}>
                     <div style={{
-                      height: "100%", display: "flex", alignItems: "center", gap: 8,
-                      padding: "10px 14px 10px 0",
+                      height: "100%", display: "flex", flexDirection: "column", justifyContent: "center",
+                      padding: "8px 14px 8px 11px",
                       background: t.bg, borderRadius: "0 8px 8px 0",
                       borderLeft: "3px solid " + c.color,
                       border: "0.5px solid " + (isHov ? t.textMuted : t.border),
                       borderLeftWidth: 3, borderLeftColor: c.color,
                       transition: "border-color 0.15s",
                     }}>
-                      <div style={{ marginLeft: 8, flexShrink: 0 }}>
-                        {renderMiniGraph(c.conv.commits || [], c.names)}
+                      <div style={{ fontSize: 13, fontWeight: 500, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {c.conv.title || "Untitled"}
                       </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 500, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {c.conv.title || "Untitled"}
-                        </div>
-                        <div style={{ fontSize: 11, color: t.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>
-                          {c.lastPrompt}
-                        </div>
+                      <div style={{ fontSize: 11, color: t.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>
+                        {c.lastPrompt}
+                      </div>
+                      <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+                        <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "#E1F5EE", color: "#0F6E56" }}>{c.names.length}b</span>
+                        {c.mergeCount > 0 && <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "#FAEEDA", color: "#854F0B" }}>{c.mergeCount}m</span>}
+                        <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: "transparent", border: "0.5px solid " + t.border, color: t.textSub }}>{c.commitCount}c</span>
                       </div>
                     </div>
                   </div>
