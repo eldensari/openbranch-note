@@ -1,18 +1,17 @@
-# 🌿 OpenBranch
+# OpenBranch Note
 
-**Branch to explore in your chat**
+**Manual conversation logger with branching visualization. No AI — you type both sides.**
 
-A nonlinear chat app for LLM conversations. 
-
-![OpenBranch screenshot](https://openbranch.app/screenshot.png)
+A nonlinear conversation logger where you manually enter both prompts and responses, with git-style branching and merging.
 
 ## Features
 
+- **Turn-based input** — Alternate between typing prompts and responses manually
 - **Branch** — Edit any message to fork a new branch and explore a different direction
 - **Merge** — Combine insights from multiple branches into one thread
-- **Graph visualization** — See the shape of your reasoning as a git-style commit graph
+- **Graph visualization** — See the shape of your conversation as a git-style commit graph
+- **Timeline view** — Type `/show today` or `/show yesterday` to review your day's conversations
 - **Dark / Light mode** — Toggle with one click
-- **BYOK** — Bring Your Own Key. Supports Anthropic, OpenAI, and Gemini
 
 ## Tech Stack
 
@@ -29,14 +28,10 @@ npm run dev
 
 Open [http://localhost:5173](http://localhost:5173).
 
-## Contact
-
-Built by [Elden Sari](https://github.com/eldensari) — reach out at eldensari@proton.me
-
 ## License
 
 MIT
 
 ---
 
-[openbranch.app](https://openbranch.app)
+[GitHub](https://github.com/eldensari/openbranch-note)

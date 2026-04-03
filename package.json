@@ -1,7 +1,7 @@
 {
-  "name": "openbranch",
+  "name": "openbranch-note",
   "version": "0.1.0",
-  "description": "Branch your thinking. Merge your ideas.",
+  "description": "Manual conversation logger with branching visualization. No AI — you type both sides.",
   "type": "module",
   "scripts": {
     "dev": "vite",

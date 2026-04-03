@@ -1,8 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import storage from "./lib/storage";
-import { callLLM, detectProvider, submitWaitlist } from "./lib/llm";
 import herbIcon from "./assets/herb.svg";
-import seedMobyDick from "./seed-moby-dick";
 
 /* ═══════ THEME ═══════ */
 const LIGHT = {
@@ -78,16 +76,6 @@ function renderMd(text, t) {
   return elements;
 }
 
-/* ═══════ THINKING DOTS ═══════ */
-function ThinkingDots() {
-  const [dots, setDots] = useState("");
-  useEffect(() => {
-    const interval = setInterval(() => setDots(d => d.length >= 3 ? "" : d + "."), 400);
-    return () => clearInterval(interval);
-  }, []);
-  return <span>Thinking{dots}<span style={{ visibility: "hidden" }}>{"...".slice(dots.length)}</span></span>;
-}
-
 /* ═══════ ICONS ═══════ */
 const SunIcon = () => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -106,7 +94,7 @@ const GitHubIcon = () => (
 );
 
 /* ═══════ DATA ═══════ */
-let cc = 100; // start high to avoid conflicts with demo IDs
+let cc = 100;
 function mkId() { return "c" + (++cc) + "_" + Math.random().toString(36).slice(2, 5); }
 function mkCommit(parentId, prompt, response, branch, mergeIds) {
   return { id: mkId(), parentId, mergeIds: mergeIds || [], prompt, response, branch, ts: Date.now() };
@@ -123,8 +111,19 @@ function bHead(c, b) { const bc = c.filter(x => x.branch === b); return bc.lengt
 const BC = ["#1D9E75", "#378ADD", "#D85A30", "#D4537E", "#7F77DD", "#BA7517", "#E24B4A", "#639922"];
 function bCol(names, b) { return BC[names.indexOf(b) % BC.length] || "#888"; }
 
+/* ═══════ TIMELINE HELPERS ═══════ */
+function isSameDay(d1, d2) {
+  return d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1.getDate() === d2.getDate();
+}
+function formatDate(d) {
+  return d.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+}
+function formatTime(iso) {
+  return new Date(iso).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+}
+
 /* ═══════ GIT GRAPH ═══════ */
-function Graph({ commits, headId, activeBranch, names, onCheckout, onEdit, onNew, onDelete, mergeMode, selected, onToggleSel, parentRef, onGoToParent, childRefs, onGoToChild, hoveredCid, panelW, t }) {
+function Graph({ commits, headId, activeBranch, names, onCheckout, onEdit, onNew, onDelete, mergeMode, selected, onToggleSel, parentRef, onGoToParent, childRefs, onGoToChild, hoveredCid, panelW, t, readOnly }) {
   const [ctx, setCtx] = useState(null);
   const hasParent = !!parentRef;
   const sorted = [...commits].sort((a, b) => a.ts - b.ts);
@@ -163,8 +162,8 @@ function Graph({ commits, headId, activeBranch, names, onCheckout, onEdit, onNew
       <div style={{ padding: "6px 8px", display: "flex", flexWrap: "wrap", gap: 3, borderBottom: "0.5px solid " + t.border, position: "sticky", top: 0, background: t.graphBg, zIndex: 2 }}>
         {names.map(b => {
           const c = bCol(names, b), act = b === activeBranch;
-          return <button key={b} onClick={() => { const h = bHead(commits, b); if (h) onCheckout(h.id, b); }}
-            style={{ fontSize: 8, padding: "2px 7px", borderRadius: 3, cursor: "pointer", fontFamily: "monospace", fontWeight: act ? 600 : 400, background: act ? c + "20" : "transparent", color: c, border: act ? "1px solid " + c + "50" : "0.5px solid " + t.border }}>
+          return <button key={b} onClick={() => { if (readOnly) return; const h = bHead(commits, b); if (h) onCheckout(h.id, b); }}
+            style={{ fontSize: 8, padding: "2px 7px", borderRadius: 3, cursor: readOnly ? "default" : "pointer", fontFamily: "monospace", fontWeight: act ? 600 : 400, background: act ? c + "20" : "transparent", color: c, border: act ? "1px solid " + c + "50" : "0.5px solid " + t.border }}>
             {b}{act ? " \u25CF" : ""}
           </button>;
         })}
@@ -201,7 +200,7 @@ function Graph({ commits, headId, activeBranch, names, onCheckout, onEdit, onNew
 
           if (n.type === "ghost") {
             return (
-              <g key={n.vid} style={{ cursor: "pointer" }} onClick={e => { e.stopPropagation(); onGoToParent(); }}>
+              <g key={n.vid} style={{ cursor: readOnly ? "default" : "pointer" }} onClick={e => { e.stopPropagation(); if (!readOnly) onGoToParent(); }}>
                 <circle cx={p.x} cy={p.y} r={5} fill="none" stroke={t.textMuted} strokeWidth="1.5" strokeDasharray="3 2" />
                 <text x={lX} y={p.y - 2} fontSize="9" fill={t.textMuted} fontStyle="italic" style={{ fontFamily: "system-ui" }}>
                   {trunc(n.label, maxChars)}
@@ -215,7 +214,7 @@ function Graph({ commits, headId, activeBranch, names, onCheckout, onEdit, onNew
 
           if (n.type === "child") {
             return (
-              <g key={n.vid} style={{ cursor: "pointer" }} onClick={e => { e.stopPropagation(); onGoToChild(n.childConvId); }}>
+              <g key={n.vid} style={{ cursor: readOnly ? "default" : "pointer" }} onClick={e => { e.stopPropagation(); if (!readOnly) onGoToChild(n.childConvId); }}>
                 <circle cx={p.x} cy={p.y} r={5} fill="none" stroke={t.textMuted} strokeWidth="1.5" strokeDasharray="3 2" />
                 <text x={lX} y={p.y - 2} fontSize="9" fill={t.textMuted} fontStyle="italic" style={{ fontFamily: "system-ui" }}>
                   {"\u2198 " + trunc(n.label, maxChars - 2)}
@@ -237,9 +236,9 @@ function Graph({ commits, headId, activeBranch, names, onCheckout, onEdit, onNew
           const r = cur ? 5 : (isMrg ? 5 : nR);
 
           return (
-            <g key={n.vid} style={{ cursor: "pointer" }}
-              onClick={e => { e.stopPropagation(); setCtx(null); if (mergeMode) { onToggleSel(n.cid); return; } if (cm) onCheckout(cm.id, cm.branch); }}
-              onContextMenu={e => { e.preventDefault(); e.stopPropagation(); setCtx({ x: e.clientX, y: e.clientY, cid: n.cid, isPrompt: isPr }); }}>
+            <g key={n.vid} style={{ cursor: readOnly ? "default" : "pointer" }}
+              onClick={e => { e.stopPropagation(); if (readOnly) return; setCtx(null); if (mergeMode) { onToggleSel(n.cid); return; } if (cm) onCheckout(cm.id, cm.branch); }}
+              onContextMenu={e => { if (readOnly) return; e.preventDefault(); e.stopPropagation(); setCtx({ x: e.clientX, y: e.clientY, cid: n.cid, isPrompt: isPr }); }}>
               {(cur || sel || hov) && <circle cx={p.x} cy={p.y} r={hov ? 11 : 9} fill={sel ? "#BA7517" : col} opacity={hov ? 0.25 : 0.15} />}
               {isMrg
                 ? <rect x={p.x - r} y={p.y - r} width={r * 2} height={r * 2} rx={2} fill={col} stroke={col} strokeWidth="1.5" />
@@ -257,7 +256,7 @@ function Graph({ commits, headId, activeBranch, names, onCheckout, onEdit, onNew
       </svg>
 
       {/* Context menu */}
-      {ctx && !ctx.confirm && (
+      {!readOnly && ctx && !ctx.confirm && (
         <div style={{ position: "fixed", left: ctx.x, top: ctx.y, zIndex: 100, background: t.bg, border: "0.5px solid " + t.border, borderRadius: 6, boxShadow: "0 2px 8px rgba(0,0,0,0.12)", padding: "4px 0", minWidth: 110 }}
           onClick={e => e.stopPropagation()}>
           <button onClick={() => { const cid = ctx.cid; setCtx(null); onEdit(cid); }}
@@ -279,7 +278,7 @@ function Graph({ commits, headId, activeBranch, names, onCheckout, onEdit, onNew
         </div>
       )}
 
-      {ctx && ctx.confirm && (
+      {!readOnly && ctx && ctx.confirm && (
         <div style={{ position: "fixed", inset: 0, zIndex: 99, background: "rgba(0,0,0,0.1)" }} onClick={() => setCtx(null)}>
           <div style={{ position: "fixed", left: ctx.x, top: ctx.y, zIndex: 100, background: t.bg, border: "0.5px solid " + t.border, borderRadius: 8, boxShadow: "0 2px 12px rgba(0,0,0,0.15)", padding: "12px 14px", minWidth: 200 }}
             onClick={e => e.stopPropagation()}>
@@ -297,25 +296,89 @@ function Graph({ commits, headId, activeBranch, names, onCheckout, onEdit, onNew
   );
 }
 
+/* ═══════ TIMELINE VIEW ═══════ */
+function TimelineView({ date, label, convs, onGoToConv, onBack, t }) {
+  const targetDate = date;
+  const filtered = convs.filter(cv => {
+    if (!cv.u) return false;
+    return isSameDay(new Date(cv.u), targetDate);
+  }).sort((a, b) => (a.u || "").localeCompare(b.u || ""));
+
+  return (
+    <div style={{ flex: 1, overflowY: "auto", padding: "14px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+        <button onClick={onBack} style={{ fontSize: 12, padding: "4px 10px", borderRadius: 6, border: "0.5px solid " + t.border, background: "transparent", color: t.textSub, cursor: "pointer" }}>
+          &larr; Back
+        </button>
+        <div style={{ fontSize: 18, fontWeight: 700, color: t.text }}>
+          {"\uD83D\uDCC5"} {label === "today" ? "Today" : "Yesterday"} &mdash; {formatDate(targetDate)}
+        </div>
+      </div>
+
+      {filtered.length === 0 && (
+        <div style={{ textAlign: "center", padding: 60, color: t.textMuted, fontSize: 14 }}>
+          No conversations found for this date.
+        </div>
+      )}
+
+      {filtered.map((cv, idx) => {
+        const mainThread = getThread(cv.commits || [], cv.headId);
+        const names = bNames(cv.commits || []);
+        return (
+          <div key={cv.id} style={{ marginBottom: 30 }}>
+            {idx > 0 && <div style={{ borderTop: "1px dashed " + t.border, margin: "20px 0" }} />}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+              <span onClick={() => onGoToConv(cv)} style={{ fontSize: 15, fontWeight: 600, color: t.userText, cursor: "pointer", textDecoration: "underline" }}>
+                {cv.title || "Untitled"}
+              </span>
+              <span style={{ fontSize: 10, color: t.textMuted }}>{formatTime(cv.u)}</span>
+              <span style={{ fontSize: 9, color: t.textMuted, fontFamily: "monospace" }}>{names.length}b</span>
+            </div>
+
+            {/* Chat history */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12, paddingLeft: 10, borderLeft: "2px solid " + t.border }}>
+              {mainThread.map(cm => {
+                const isMrg = (cm.mergeIds || []).length > 0;
+                return (
+                  <div key={cm.id} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                    <div style={{ alignSelf: "flex-end", maxWidth: "80%" }}>
+                      <div style={{ padding: "8px 12px", borderRadius: 10, fontSize: 12, lineHeight: 1.6, whiteSpace: "pre-wrap", background: isMrg ? t.mergeBubble : t.userBubble, color: isMrg ? t.mergeText : t.userText }}>
+                        {isMrg && <div style={{ fontSize: 8, fontWeight: 600, marginBottom: 3, color: "#BA7517" }}>MERGE</div>}
+                        {cm.prompt}
+                      </div>
+                    </div>
+                    <div style={{ alignSelf: "flex-start", maxWidth: "80%", padding: "8px 12px", borderRadius: 10, fontSize: 12, lineHeight: 1.6, background: t.aiBubble, color: t.aiText }}>
+                      {cm.response ? renderMd(cm.response, t) : <span style={{ color: t.textMuted, fontStyle: "italic" }}>waiting for response...</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Inline graph */}
+            {(cv.commits || []).length > 0 && (
+              <div style={{ border: "0.5px solid " + t.border, borderRadius: 8, background: t.graphBg, maxHeight: 300, overflow: "hidden" }}>
+                <Graph commits={cv.commits || []} headId={cv.headId} activeBranch={cv.branch || "main"} names={names}
+                  onCheckout={() => {}} onEdit={() => {}} onNew={() => {}} onDelete={() => {}} mergeMode={false} selected={[]} onToggleSel={() => {}}
+                  parentRef={cv.parentRef} onGoToParent={() => {}} childRefs={[]} onGoToChild={() => {}} hoveredCid={null} panelW={400} t={t} readOnly />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ═══════ MAIN ═══════ */
 export default function App() {
   const [dark, setDark] = useState(() => storage.get("theme")?.value === "dark");
   const t = dark ? DARK : LIGHT;
 
-  const [apiKey, setApiKey] = useState(() => storage.get("apiKey")?.value || "");
-  const [showKeyInput, setShowKeyInput] = useState(false);
-  const [keyDraft, setKeyDraft] = useState("");
-  const hasKey = !!apiKey.trim();
-  const [rateLimited, setRateLimited] = useState(false);
-  const [waitlistEmail, setWaitlistEmail] = useState("");
-  const [waitlistStatus, setWaitlistStatus] = useState(null); // null | "sending" | "done" | "error"
-
   const [commits, setCommits] = useState([]);
   const [headId, setHeadId] = useState(null);
   const [branch, setBranch] = useState("main");
   const [input, setInput] = useState("");
-  const [thinking, setThinking] = useState(false);
-  const [pending, setPending] = useState(null);
   const [graph, setGraph] = useState(true);
   const [mm, setMm] = useState(false);
   const [sel, setSel] = useState([]);
@@ -330,44 +393,31 @@ export default function App() {
   const [chatMenu, setChatMenu] = useState(null);
   const [renamingId, setRenamingId] = useState(null);
   const [renameVal, setRenameVal] = useState("");
+  const [timelineView, setTimelineView] = useState(null); // null | { date: Date, label: "today" | "yesterday" }
+
+  // Turn-based state: "prompt" or "response"
+  const [turn, setTurn] = useState("prompt");
+
   const dragging = useRef(false);
   const endRef = useRef(null);
   const inputRef = useRef(null);
   const cRef = useRef(commits); cRef.current = commits;
-  const sendRef = useRef(null);
 
   // Persist theme
   useEffect(() => { storage.set("theme", dark ? "dark" : "light"); }, [dark]);
 
-  // Seed data on first visit, then load convs
+  // Load conversations
   useEffect(() => {
-    seedMobyDick();
     const r = storage.list("conv:");
     if (r?.keys?.length) {
       const cs = [];
       for (const k of r.keys) { const p = storage.get(k); if (p?.value) { try { cs.push(JSON.parse(p.value)); } catch {} } }
       const sorted = cs.sort((a, b) => (b.u || "").localeCompare(a.u || ""));
       setConvs(sorted);
-      // Auto-open Moby Dick on first visit (no conv selected yet)
-      const moby = sorted.find(c => c.id === "conv:moby_dick");
-      if (moby && !convId) {
-        load(moby);
-        setGraph(true);
-      }
     }
   }, []);
 
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [commits, headId, pending]);
-
-  // Auto-send from starter cards (use setTimeout to ensure state is settled)
-  useEffect(() => {
-    if (sendRef.current && input === sendRef.current) {
-      const q = sendRef.current;
-      sendRef.current = null;
-      // Defer to next tick so send() captures the updated input
-      setTimeout(() => send(), 0);
-    }
-  }, [input]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [commits, headId]);
 
   useEffect(() => {
     if (scrollTarget) {
@@ -391,9 +441,17 @@ export default function App() {
     setCommits(cv.commits || []); setHeadId(cv.headId); setBranch(cv.branch || "main");
     setConvId(cv.id); setParentRef(cv.parentRef || null);
     cc = Math.max(cc, (cv.commits || []).length + 10);
-    setMm(false); setSel([]); setEditId(null); setPending(null); setNewFromRef(null);
+    setMm(false); setSel([]); setEditId(null); setNewFromRef(null);
+    setTimelineView(null);
+    // Determine turn: if last commit has empty response, we're in response turn
+    const lastCommit = (cv.commits || []).length > 0 ? (cv.commits || [])[(cv.commits || []).length - 1] : null;
+    if (lastCommit && lastCommit.response === "") {
+      setTurn("response");
+    } else {
+      setTurn("prompt");
+    }
   };
-  const del = id => { storage.del(id); setConvs(p => p.filter(c => c.id !== id)); if (convId === id) { setCommits([]); setHeadId(null); setConvId(null); setParentRef(null); } };
+  const del = id => { storage.del(id); setConvs(p => p.filter(c => c.id !== id)); if (convId === id) { setCommits([]); setHeadId(null); setConvId(null); setParentRef(null); setTurn("prompt"); } };
   const renameConv = (id, newTitle) => {
     const cv = convs.find(c => c.id === id);
     if (!cv || !newTitle.trim()) return;
@@ -401,7 +459,7 @@ export default function App() {
     storage.set(id, JSON.stringify(updated));
     setConvs(p => p.map(c => c.id === id ? updated : c));
   };
-  const newConv = () => { setCommits([]); setHeadId(null); setBranch("main"); setConvId(null); setParentRef(null); setMm(false); setSel([]); setEditId(null); setPending(null); setNewFromRef(null); };
+  const newConv = () => { setCommits([]); setHeadId(null); setBranch("main"); setConvId(null); setParentRef(null); setMm(false); setSel([]); setEditId(null); setNewFromRef(null); setTurn("prompt"); setTimelineView(null); };
 
   const thread = getThread(commits, headId);
   const names = bNames(commits);
@@ -410,72 +468,84 @@ export default function App() {
     convId: cv.id, commitId: cv.parentRef.commitId, convTitle: cv.title || "Untitled",
   })) : [];
 
-  // Auto-show graph when conversation has commits
   const showGraph = graph || commits.length > 0;
 
-  // ─── SEND ───
-  const send = async () => {
-    if (!input.trim() || thinking) return;
-    const msg = input.trim(); setInput("");
+  // ─── SEND (turn-based) ───
+  const send = () => {
+    if (!input.trim()) return;
+    const msg = input.trim();
+
+    // Check for /show commands
+    if (msg === "/show today") {
+      setInput("");
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      setTimelineView({ date: today, label: "today" });
+      return;
+    }
+    if (msg === "/show yesterday") {
+      setInput("");
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      yesterday.setHours(0, 0, 0, 0);
+      setTimelineView({ date: yesterday, label: "yesterday" });
+      return;
+    }
+
+    setInput("");
     let pid = headId, br = branch;
 
     // Auto-show graph on first message
     if (!graph && commits.length === 0) setGraph(true);
 
-    if (newFromRef) {
-      const parentThread = newFromRef.thread || [];
-      const pRef = { convId: newFromRef.convId, commitId: newFromRef.commitId, convTitle: newFromRef.convTitle, promptSummary: newFromRef.promptSummary };
-      const newId = "conv:" + Date.now();
-
-      setCommits([]); cRef.current = [];
-      setHeadId(null); setBranch("main"); setConvId(newId);
-      setParentRef(pRef); setNewFromRef(null); setGraph(true);
-      save(msg.slice(0, 40), [], null, "main", pRef, newId);
-
-      setPending(msg); setThinking(true);
-      try {
-        const msgs = [];
-        parentThread.forEach(c => { msgs.push({ role: "user", content: c.prompt }); if (c.response) msgs.push({ role: "assistant", content: c.response }); });
-        msgs.push({ role: "user", content: msg });
-        const resp = await callLLM(apiKey, msgs);
-        const cm = mkCommit(null, msg, resp, "main");
-        const nc = [cm];
-        setCommits(nc); cRef.current = nc; setHeadId(cm.id); setPending(null);
-        save(msg.slice(0, 40), nc, cm.id, "main", pRef, newId);
-      } catch (e) {
-        if (e.code === "RATE_LIMIT") { setRateLimited(true); setPending(null); setThinking(false); return; }
-        const cm = mkCommit(null, msg, "Error: " + e.message, "main");
-        const nc = [cm];
-        setCommits(nc); cRef.current = nc; setHeadId(cm.id); setPending(null);
-        save(msg.slice(0, 40), nc, cm.id, "main", pRef, newId);
-      } finally { setThinking(false); }
+    // ── Response turn ──
+    if (turn === "response") {
+      // Find the last commit (the one with empty response) and fill it
+      const lastCommit = cRef.current.find(c => c.id === headId);
+      if (lastCommit) {
+        const nc = cRef.current.map(c => c.id === headId ? { ...c, response: msg } : c);
+        setCommits(nc); cRef.current = nc;
+        save(null, nc, headId, br);
+      }
+      setTurn("prompt");
       return;
     }
 
+    // ── Prompt turn ──
+
+    // newFromRef: create new conversation from a parent commit
+    if (newFromRef) {
+      const pRef = { convId: newFromRef.convId, commitId: newFromRef.commitId, convTitle: newFromRef.convTitle, promptSummary: newFromRef.promptSummary };
+      const newId = "conv:" + Date.now();
+      setCommits([]); cRef.current = [];
+      setHeadId(null); setBranch("main"); setConvId(newId);
+      setParentRef(pRef); setNewFromRef(null); setGraph(true);
+
+      const cm = mkCommit(null, msg, "", "main");
+      const nc = [cm];
+      setCommits(nc); cRef.current = nc; setHeadId(cm.id);
+      save(msg.slice(0, 40), nc, cm.id, "main", pRef, newId);
+      setTurn("response");
+      return;
+    }
+
+    // editId: editing an existing commit (creates a branch)
     if (editId) {
       const ec = cRef.current.find(c => c.id === editId);
       if (ec) {
         if (!ec.parentId) {
+          // Editing root: create new conversation
           setEditId(null);
           const newId = "conv:" + Date.now();
           setCommits([]); cRef.current = [];
           setHeadId(null); setBranch("main"); setConvId(newId);
           setParentRef(null);
-          save(msg.slice(0, 40), [], null, "main", null, newId);
 
-          setPending(msg); setThinking(true);
-          try {
-            const resp = await callLLM(apiKey, [{ role: "user", content: msg }]);
-            const cm = mkCommit(null, msg, resp, "main");
-            const nc = [cm];
-            setCommits(nc); cRef.current = nc; setHeadId(cm.id); setPending(null);
-            save(msg.slice(0, 40), nc, cm.id, "main", null, newId);
-          } catch (e) {
-            if (e.code === "RATE_LIMIT") { setRateLimited(true); setPending(null); setThinking(false); return; }
-            const cm = mkCommit(null, msg, "Error: " + e.message, "main");
-            const nc = [cm];
-            setCommits(nc); cRef.current = nc; setHeadId(cm.id); setPending(null);
-          } finally { setThinking(false); }
+          const cm = mkCommit(null, msg, "", "main");
+          const nc = [cm];
+          setCommits(nc); cRef.current = nc; setHeadId(cm.id);
+          save(msg.slice(0, 40), nc, cm.id, "main", null, newId);
+          setTurn("response");
           return;
         }
         pid = ec.parentId; br = "branch-" + names.length; setBranch(br);
@@ -483,25 +553,50 @@ export default function App() {
       setEditId(null); setGraph(true);
     }
 
-    setPending(msg); setThinking(true);
-    try {
-      const th = getThread(cRef.current, pid);
-      const msgs = []; th.forEach(c => { msgs.push({ role: "user", content: c.prompt }); if (c.response) msgs.push({ role: "assistant", content: c.response }); });
-      msgs.push({ role: "user", content: msg });
-      const resp = await callLLM(apiKey, msgs);
-      const cm = mkCommit(pid, msg, resp, br);
-      const nc = [...cRef.current, cm]; setCommits(nc); cRef.current = nc; setHeadId(cm.id); setPending(null);
-      save(msg.slice(0, 40), nc, cm.id, br);
-    } catch (e) {
-      if (e.code === "RATE_LIMIT") { setRateLimited(true); setPending(null); setThinking(false); return; }
-      const cm = mkCommit(pid, msg, "Error: " + e.message, br);
-      const nc = [...cRef.current, cm]; setCommits(nc); cRef.current = nc; setHeadId(cm.id); setPending(null);
-    } finally { setThinking(false); }
+    // Normal prompt: create commit with empty response
+    const cm = mkCommit(pid, msg, "", br);
+    const nc = [...cRef.current, cm]; setCommits(nc); cRef.current = nc; setHeadId(cm.id);
+    save(msg.slice(0, 40), nc, cm.id, br);
+    setTurn("response");
+  };
+
+  // ─── MERGE (turn-based) ───
+  const merge = () => {
+    if (!input.trim() || !sel.length) return;
+    const msg = input.trim(); setInput(""); setMm(false);
+
+    if (turn === "response") {
+      // Fill the merge commit's response
+      const lastCommit = cRef.current.find(c => c.id === headId);
+      if (lastCommit) {
+        const nc = cRef.current.map(c => c.id === headId ? { ...c, response: msg } : c);
+        setCommits(nc); cRef.current = nc;
+        save(null, nc, headId, branch);
+      }
+      setSel([]);
+      setTurn("prompt");
+      return;
+    }
+
+    // Prompt turn: create merge commit with empty response
+    const cm = mkCommit(headId, msg, "", branch, sel);
+    const nc = [...cRef.current, cm]; setCommits(nc); cRef.current = nc; setHeadId(cm.id); setSel([]);
+    save(null, nc, cm.id, branch);
+    setTurn("response");
   };
 
   // ─── HANDLERS ───
-  const startEdit = cid => { const cm = commits.find(c => c.id === cid); if (!cm) return; setEditId(cid); setNewFromRef(null); setInput(cm.prompt); inputRef.current?.focus(); };
-  const checkout = (id, b) => { setHeadId(id); setBranch(b); setMm(false); setSel([]); setEditId(null); setPending(null); setNewFromRef(null); setScrollTarget(id); };
+  const startEdit = cid => { const cm = commits.find(c => c.id === cid); if (!cm) return; setEditId(cid); setNewFromRef(null); setInput(cm.prompt); setTurn("prompt"); inputRef.current?.focus(); };
+  const checkout = (id, b) => {
+    setHeadId(id); setBranch(b); setMm(false); setSel([]); setEditId(null); setNewFromRef(null); setScrollTarget(id);
+    // Check if the checked-out commit needs a response
+    const cm = commits.find(c => c.id === id);
+    if (cm && cm.response === "") {
+      setTurn("response");
+    } else {
+      setTurn("prompt");
+    }
+  };
   const toggleSel = id => setSel(p => p.includes(id) ? p.filter(x => x !== id) : [...p, id]);
 
   const startNew = (cid) => {
@@ -515,7 +610,7 @@ export default function App() {
       promptSummary: cm.prompt?.slice(0, 30) + (cm.prompt?.length > 30 ? ".." : ""),
     });
     setEditId(null); setMm(false); setSel([]);
-    setInput(""); inputRef.current?.focus();
+    setInput(""); setTurn("prompt"); inputRef.current?.focus();
   };
 
   const goToParent = () => {
@@ -547,24 +642,12 @@ export default function App() {
     }
     const existingConv = convs.find(c => c.id === convId);
     save(existingConv?.title, nc, newHeadId, newBranch);
+    setTurn("prompt");
   };
 
-  const merge = async () => {
-    if (!input.trim() || !sel.length) return;
-    const msg = input.trim(); setInput(""); setMm(false); setPending(msg); setThinking(true);
-    try {
-      const curTh = getThread(cRef.current, headId).map(c => "User: " + c.prompt + "\nAI: " + c.response).join("\n\n");
-      const selCtx = sel.map(sid => { const sc = cRef.current.find(c => c.id === sid); if (!sc) return ""; return "[" + sc.branch + "]:\n" + getThread(cRef.current, sid).map(c => "User: " + c.prompt + "\nAI: " + c.response).join("\n\n"); }).join("\n---\n");
-      const resp = await callLLM(apiKey, [{ role: "user", content: "Merge:\n\nCurrent (" + branch + "):\n" + curTh + "\n\nSelected:\n" + selCtx + "\n\nInstruction:\n" + msg }]);
-      const cm = mkCommit(headId, msg, resp, branch, sel);
-      const nc = [...cRef.current, cm]; setCommits(nc); cRef.current = nc; setHeadId(cm.id); setSel([]); setPending(null);
-      save(null, nc, cm.id, branch);
-    } catch (e) {
-      if (e.code === "RATE_LIMIT") { setRateLimited(true); setPending(null); setSel([]); setThinking(false); return; }
-      const cm = mkCommit(headId, msg, "Merge error: " + e.message, branch);
-      const nc = [...cRef.current, cm]; setCommits(nc); cRef.current = nc; setHeadId(cm.id); setSel([]); setPending(null);
-    } finally { setThinking(false); }
-  };
+  // Determine button label
+  const btnLabel = editId ? "Edit" : newFromRef ? "New" : mm ? "Merge" : turn === "prompt" ? "Prompt" : "Response";
+  const placeholder = editId ? "Edit your question..." : newFromRef ? "Start new conversation..." : mm ? "Merge instruction..." : turn === "prompt" ? "Enter prompt..." : "Enter response...";
 
   /* RENDER */
   return (
@@ -617,34 +700,6 @@ export default function App() {
           </div>
         )}
 
-        {/* API Key */}
-        <div style={{ borderTop: "0.5px solid " + t.border, padding: "6px 6px 0" }}>
-          {!showKeyInput ? (
-            <button onClick={() => { setKeyDraft(apiKey); setShowKeyInput(true); }}
-              style={{ width: "100%", padding: "5px 8px", fontSize: 9, borderRadius: 4, border: "none", background: "transparent", cursor: "pointer",
-                color: hasKey ? "#1D9E75" : t.textSub, textAlign: "left", display: "flex", alignItems: "center", gap: 4 }}
-              onMouseEnter={e => e.currentTarget.style.background = t.hoverSidebar} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-              {hasKey ? "\u{1F511} Connected" : "\u{1F511} API Key"}
-              {hasKey && detectProvider(apiKey) && <span style={{ fontSize: 8, color: detectProvider(apiKey).color, fontWeight: 500 }}>{detectProvider(apiKey).name}</span>}
-            </button>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "2px 0 4px" }}>
-              <input autoFocus type="password" value={keyDraft} onChange={e => setKeyDraft(e.target.value)}
-                placeholder="sk-ant-... or sk-..."
-                onKeyDown={e => { if (e.key === "Enter") { setApiKey(keyDraft.trim()); storage.set("apiKey", keyDraft.trim()); setShowKeyInput(false); setRateLimited(false); } if (e.key === "Escape") setShowKeyInput(false); }}
-                style={{ width: "100%", boxSizing: "border-box", padding: "5px 6px", fontSize: 9, borderRadius: 4, border: "0.5px solid " + t.border, background: t.bg, color: t.text, fontFamily: "monospace" }} />
-              <div style={{ display: "flex", gap: 3 }}>
-                <button onClick={() => { setApiKey(keyDraft.trim()); storage.set("apiKey", keyDraft.trim()); setShowKeyInput(false); setRateLimited(false); }}
-                  style={{ flex: 1, padding: "3px", fontSize: 8, fontWeight: 600, borderRadius: 3, background: t.accent, color: t.accentText, border: "none", cursor: "pointer" }}>Save</button>
-                <button onClick={() => setShowKeyInput(false)}
-                  style={{ flex: 1, padding: "3px", fontSize: 8, borderRadius: 3, background: "transparent", border: "0.5px solid " + t.border, cursor: "pointer", color: t.textSub }}>Cancel</button>
-              </div>
-              {keyDraft.trim() && detectProvider(keyDraft) && <div style={{ fontSize: 8, color: detectProvider(keyDraft).color, fontWeight: 500 }}>{"\u2713"} {detectProvider(keyDraft).name}</div>}
-              {keyDraft.trim() && !detectProvider(keyDraft) && <div style={{ fontSize: 8, color: "#c00" }}>{"\u2717"} Unknown format</div>}
-            </div>
-          )}
-        </div>
-
         {/* Bottom bar: dark mode toggle + GitHub */}
         <div style={{ borderTop: "0.5px solid " + t.border, padding: "8px 10px", display: "flex", alignItems: "center", gap: 8 }}>
           <button onClick={() => setDark(d => !d)} title={dark ? "Light mode" : "Dark mode"}
@@ -652,7 +707,7 @@ export default function App() {
             onMouseEnter={e => e.currentTarget.style.color = t.text} onMouseLeave={e => e.currentTarget.style.color = t.textSub}>
             {dark ? <SunIcon /> : <MoonIcon />}
           </button>
-          <a href="https://github.com/eldensari/openbranch" target="_blank" rel="noopener noreferrer" title="GitHub"
+          <a href="https://github.com/eldensari/openbranch-note" target="_blank" rel="noopener noreferrer" title="GitHub"
             style={{ color: t.textSub, display: "flex", alignItems: "center", padding: 4, borderRadius: 4 }}
             onMouseEnter={e => e.currentTarget.style.color = t.text} onMouseLeave={e => e.currentTarget.style.color = t.textSub}>
             <GitHubIcon />
@@ -664,121 +719,88 @@ export default function App() {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
         <div style={{ padding: "7px 12px", borderBottom: "0.5px solid " + t.border, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: t.text, display: "flex", alignItems: "center", gap: 4 }}><img src={herbIcon} alt="" style={{ width: 16, height: 16 }} /> OpenBranch</span>
-            {names.length > 0 && <span style={{ fontSize: 9, padding: "2px 7px", borderRadius: 3, background: bCol(names, branch) + "18", color: bCol(names, branch), fontWeight: 500, fontFamily: "monospace" }}>{branch}</span>}
-            {parentRef && <span onClick={goToParent} style={{ fontSize: 8, color: "#378ADD", cursor: "pointer" }}>{"\u2197"} from: {parentRef.convTitle?.slice(0, 20)}</span>}
+            <span style={{ fontSize: 12, fontWeight: 600, color: t.text, display: "flex", alignItems: "center", gap: 4 }}><img src={herbIcon} alt="" style={{ width: 16, height: 16 }} /> OpenBranch Note</span>
+            {!timelineView && names.length > 0 && <span style={{ fontSize: 9, padding: "2px 7px", borderRadius: 3, background: bCol(names, branch) + "18", color: bCol(names, branch), fontWeight: 500, fontFamily: "monospace" }}>{branch}</span>}
+            {!timelineView && parentRef && <span onClick={goToParent} style={{ fontSize: 8, color: "#378ADD", cursor: "pointer" }}>{"\u2197"} from: {parentRef.convTitle?.slice(0, 20)}</span>}
           </div>
-          {commits.length > 0 && <button onClick={() => setGraph(!graph)} style={{ fontSize: 9, padding: "4px 8px", borderRadius: 4, cursor: "pointer", background: graph ? t.accent : "transparent", color: graph ? t.accentText : t.textSub, border: graph ? "none" : "0.5px solid " + t.border }}>{graph ? "Hide graph" : "Graph"}</button>}
+          {!timelineView && commits.length > 0 && <button onClick={() => setGraph(!graph)} style={{ fontSize: 9, padding: "4px 8px", borderRadius: 4, cursor: "pointer", background: graph ? t.accent : "transparent", color: graph ? t.accentText : t.textSub, border: graph ? "none" : "0.5px solid " + t.border }}>{graph ? "Hide graph" : "Graph"}</button>}
         </div>
 
-        <div style={{ flex: 1, overflowY: "auto", padding: "14px", display: "flex", flexDirection: "column", gap: 10 }}>
-          {thread.length === 0 && !pending && !newFromRef && (
-            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <div style={{ textAlign: "center", maxWidth: 520 }}>
-                <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 6, letterSpacing: "-0.5px", color: t.text, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><img src={herbIcon} alt="OpenBranch" style={{ width: 36, height: 36 }} /> OpenBranch</div>
-                <div style={{ fontSize: 13, color: t.textSub, marginBottom: 24 }}>Expand your chat. Merge your ideas.</div>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
-                  {["Should I learn Rust or Go for backend?", "Help me plan a startup strategy", "Compare pros and cons of remote work"].map(q => (
-                    <button key={q} onClick={() => { setInput(q); sendRef.current = q; }}
-                      style={{ flex: "1 1 140px", maxWidth: 200, padding: "12px 14px", fontSize: 12, lineHeight: 1.5, borderRadius: 10, border: "1px solid " + t.border, background: t.bg, color: t.textSub, cursor: "pointer", textAlign: "left", transition: "all 0.15s" }}
-                      onMouseEnter={e => { e.currentTarget.style.background = t.hoverSidebar; e.currentTarget.style.borderColor = t.textMuted; e.currentTarget.style.color = t.text; }}
-                      onMouseLeave={e => { e.currentTarget.style.background = t.bg; e.currentTarget.style.borderColor = t.border; e.currentTarget.style.color = t.textSub; }}>
-                      {q}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
-          {thread.map(cm => {
-            const isMrg = (cm.mergeIds || []).length > 0;
-            return (
-              <div key={cm.id} id={"cm-" + cm.id} style={{ display: "flex", flexDirection: "column", gap: 4 }}
-                onMouseEnter={() => setHoveredCid(cm.id)} onMouseLeave={() => setHoveredCid(null)}>
-                <div style={{ alignSelf: "flex-end", maxWidth: "80%" }}>
-                  <div style={{ padding: "10px 14px", borderRadius: 12, fontSize: 13, lineHeight: 1.7, whiteSpace: "pre-wrap", background: isMrg ? t.mergeBubble : t.userBubble, color: isMrg ? t.mergeText : t.userText, borderLeft: isMrg ? "3px solid #BA7517" : "none" }}>
-                    {isMrg && <div style={{ fontSize: 9, fontWeight: 600, marginBottom: 4, color: "#BA7517" }}>MERGE</div>}
-                    {cm.prompt}
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 2 }}>
-                    <button onClick={() => startEdit(cm.id)} style={{ fontSize: 9, color: editId === cm.id ? t.userText : t.textMuted, background: "none", border: "none", cursor: "pointer", padding: "1px 4px" }}
-                      onMouseEnter={e => e.currentTarget.style.color = t.userText} onMouseLeave={e => { if (editId !== cm.id) e.currentTarget.style.color = t.textMuted; }}>edit</button>
+        {/* Timeline view or normal chat */}
+        {timelineView ? (
+          <TimelineView date={timelineView.date} label={timelineView.label} convs={convs} onGoToConv={cv => { load(cv); setTimelineView(null); }} onBack={() => setTimelineView(null)} t={t} />
+        ) : (
+          <>
+            <div style={{ flex: 1, overflowY: "auto", padding: "14px", display: "flex", flexDirection: "column", gap: 10 }}>
+              {thread.length === 0 && !newFromRef && (
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <div style={{ textAlign: "center", maxWidth: 520 }}>
+                    <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 6, letterSpacing: "-0.5px", color: t.text, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><img src={herbIcon} alt="OpenBranch Note" style={{ width: 36, height: 36 }} /> OpenBranch Note</div>
+                    <div style={{ fontSize: 13, color: t.textSub, marginBottom: 24 }}>Manual conversation logger with branching visualization.</div>
+                    <div style={{ fontSize: 11, color: t.textMuted }}>Type <code style={{ background: t.inlineCode, padding: "1px 4px", borderRadius: 3, fontSize: "0.9em" }}>/show today</code> or <code style={{ background: t.inlineCode, padding: "1px 4px", borderRadius: 3, fontSize: "0.9em" }}>/show yesterday</code> to review your timeline.</div>
                   </div>
                 </div>
-                <div style={{ alignSelf: "flex-start", maxWidth: "80%", padding: "10px 14px", borderRadius: 12, fontSize: 13, lineHeight: 1.7, background: t.aiBubble, color: t.aiText }}>{renderMd(cm.response, t)}</div>
-              </div>
-            );
-          })}
-          {pending && <div style={{ alignSelf: "flex-end", maxWidth: "80%", padding: "10px 14px", borderRadius: 12, fontSize: 13, lineHeight: 1.7, background: newFromRef ? "#f0f6ff" : t.userBubble, color: newFromRef ? "#378ADD" : t.userText }}>{pending}</div>}
-          {thinking && <div style={{ padding: "10px 14px", borderRadius: 12, background: t.aiBubble, fontSize: 13, color: t.textMuted, alignSelf: "flex-start" }}><ThinkingDots /></div>}
-          <div ref={endRef} />
-        </div>
-
-        {/* Mode indicators */}
-        {editId && <div style={{ padding: "6px 12px", borderTop: "0.5px solid " + t.border, background: t.userBubble, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: 11, color: t.userText, fontWeight: 500 }}>Editing — new branch</span>
-          <button onClick={() => { setEditId(null); setInput(""); }} style={{ fontSize: 9, padding: "2px 8px", borderRadius: 3, background: "transparent", border: "0.5px solid " + t.border, cursor: "pointer", color: t.textSub }}>Cancel</button>
-        </div>}
-        {newFromRef && <div style={{ padding: "6px 12px", borderTop: "0.5px solid " + t.border, background: "#f0f6ff", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: 11, color: "#378ADD", fontWeight: 500 }}>New conversation from {newFromRef.promptSummary?.slice(0, 25)}..</span>
-          <button onClick={() => { setNewFromRef(null); setInput(""); }} style={{ fontSize: 9, padding: "2px 8px", borderRadius: 3, background: "transparent", border: "0.5px solid " + t.border, cursor: "pointer", color: t.textSub }}>Cancel</button>
-        </div>}
-        {mm && sel.length > 0 && <div style={{ padding: "6px 12px", borderTop: "0.5px solid " + t.border, background: t.mergeBubble, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontSize: 11, color: t.mergeText, fontWeight: 500 }}>Merging {sel.length} into {branch}</span>
-          <button onClick={() => { setMm(false); setSel([]); }} style={{ fontSize: 9, padding: "2px 8px", borderRadius: 3, background: "transparent", border: "0.5px solid " + t.border, cursor: "pointer", color: t.textSub }}>Cancel</button>
-        </div>}
-
-        {/* Rate limit banner */}
-        {rateLimited && !hasKey && (
-          <div style={{ padding: "10px 14px", borderTop: "0.5px solid " + t.border, background: dark ? "#2a1a0e" : "#fef9ef" }}>
-            <div style={{ fontSize: 12, fontWeight: 500, color: dark ? "#f0c060" : "#854F0B", marginBottom: 6 }}>
-              You've reached the free message limit. Enter your API key to continue, or leave your email for updates.
+              )}
+              {thread.map(cm => {
+                const isMrg = (cm.mergeIds || []).length > 0;
+                return (
+                  <div key={cm.id} id={"cm-" + cm.id} style={{ display: "flex", flexDirection: "column", gap: 4 }}
+                    onMouseEnter={() => setHoveredCid(cm.id)} onMouseLeave={() => setHoveredCid(null)}>
+                    <div style={{ alignSelf: "flex-end", maxWidth: "80%" }}>
+                      <div style={{ padding: "10px 14px", borderRadius: 12, fontSize: 13, lineHeight: 1.7, whiteSpace: "pre-wrap", background: isMrg ? t.mergeBubble : t.userBubble, color: isMrg ? t.mergeText : t.userText, borderLeft: isMrg ? "3px solid #BA7517" : "none" }}>
+                        {isMrg && <div style={{ fontSize: 9, fontWeight: 600, marginBottom: 4, color: "#BA7517" }}>MERGE</div>}
+                        {cm.prompt}
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 2 }}>
+                        <button onClick={() => startEdit(cm.id)} style={{ fontSize: 9, color: editId === cm.id ? t.userText : t.textMuted, background: "none", border: "none", cursor: "pointer", padding: "1px 4px" }}
+                          onMouseEnter={e => e.currentTarget.style.color = t.userText} onMouseLeave={e => { if (editId !== cm.id) e.currentTarget.style.color = t.textMuted; }}>edit</button>
+                      </div>
+                    </div>
+                    <div style={{ alignSelf: "flex-start", maxWidth: "80%", padding: "10px 14px", borderRadius: 12, fontSize: 13, lineHeight: 1.7, background: t.aiBubble, color: t.aiText }}>
+                      {cm.response ? renderMd(cm.response, t) : <span style={{ color: t.textMuted, fontStyle: "italic" }}>waiting for response...</span>}
+                    </div>
+                  </div>
+                );
+              })}
+              <div ref={endRef} />
             </div>
-            {waitlistStatus === "done" ? (
-              <div style={{ fontSize: 11, color: "#1D9E75", fontWeight: 500 }}>{"\u2713"} You're on the list! We'll reach out soon.</div>
-            ) : (
-              <div style={{ display: "flex", gap: 6 }}>
-                <input value={waitlistEmail} onChange={e => setWaitlistEmail(e.target.value)}
-                  placeholder="your@email.com"
-                  onKeyDown={e => { if (e.key === "Enter" && waitlistEmail.trim()) {
-                    setWaitlistStatus("sending");
-                    submitWaitlist(waitlistEmail.trim()).then(r => setWaitlistStatus(r.ok ? "done" : "error")).catch(() => setWaitlistStatus("error"));
-                  }}}
-                  style={{ flex: 1, padding: "6px 8px", fontSize: 11, borderRadius: 6, border: "0.5px solid " + t.border, background: t.bg, color: t.text }} />
-                <button onClick={() => {
-                    if (!waitlistEmail.trim()) return;
-                    setWaitlistStatus("sending");
-                    submitWaitlist(waitlistEmail.trim()).then(r => setWaitlistStatus(r.ok ? "done" : "error")).catch(() => setWaitlistStatus("error"));
-                  }}
-                  disabled={waitlistStatus === "sending" || !waitlistEmail.trim()}
-                  style={{ padding: "6px 12px", fontSize: 11, fontWeight: 500, borderRadius: 6, background: t.accent, color: t.accentText, border: "none", cursor: "pointer", opacity: waitlistStatus === "sending" ? 0.5 : 1 }}>
-                  {waitlistStatus === "sending" ? "..." : "Notify me"}
-                </button>
-              </div>
-            )}
-            {waitlistStatus === "error" && <div style={{ fontSize: 10, color: "#c00", marginTop: 4 }}>Something went wrong. Try again.</div>}
-            <button onClick={() => { setKeyDraft(apiKey); setShowKeyInput(true); setRateLimited(false); }}
-              style={{ fontSize: 10, color: t.textSub, background: "none", border: "none", cursor: "pointer", marginTop: 6, padding: 0, textDecoration: "underline" }}>
-              Enter API key instead
-            </button>
-          </div>
+
+            {/* Mode indicators */}
+            {editId && <div style={{ padding: "6px 12px", borderTop: "0.5px solid " + t.border, background: t.userBubble, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 11, color: t.userText, fontWeight: 500 }}>Editing — new branch</span>
+              <button onClick={() => { setEditId(null); setInput(""); }} style={{ fontSize: 9, padding: "2px 8px", borderRadius: 3, background: "transparent", border: "0.5px solid " + t.border, cursor: "pointer", color: t.textSub }}>Cancel</button>
+            </div>}
+            {newFromRef && <div style={{ padding: "6px 12px", borderTop: "0.5px solid " + t.border, background: "#f0f6ff", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 11, color: "#378ADD", fontWeight: 500 }}>New conversation from {newFromRef.promptSummary?.slice(0, 25)}..</span>
+              <button onClick={() => { setNewFromRef(null); setInput(""); }} style={{ fontSize: 9, padding: "2px 8px", borderRadius: 3, background: "transparent", border: "0.5px solid " + t.border, cursor: "pointer", color: t.textSub }}>Cancel</button>
+            </div>}
+            {mm && sel.length > 0 && <div style={{ padding: "6px 12px", borderTop: "0.5px solid " + t.border, background: t.mergeBubble, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 11, color: t.mergeText, fontWeight: 500 }}>Merging {sel.length} into {branch}</span>
+              <button onClick={() => { setMm(false); setSel([]); }} style={{ fontSize: 9, padding: "2px 8px", borderRadius: 3, background: "transparent", border: "0.5px solid " + t.border, cursor: "pointer", color: t.textSub }}>Cancel</button>
+            </div>}
+
+            {/* Turn indicator */}
+            <div style={{ padding: "4px 12px", borderTop: "0.5px solid " + t.border, fontSize: 10, color: t.textMuted }}>
+              {turn === "prompt" ? "\uD83D\uDCDD Prompt turn" : "\uD83D\uDCAC Response turn"}
+            </div>
+
+            {/* Input */}
+            <div style={{ padding: "8px 12px", borderTop: "0.5px solid " + t.border, display: "flex", gap: 6, alignItems: "center" }}>
+              <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); mm && sel.length ? merge() : send(); } }}
+                placeholder={placeholder}
+                style={{ flex: 1, padding: "10px 12px", fontSize: 13, borderRadius: 8, border: editId ? "1.5px solid " + t.userText : newFromRef ? "1.5px solid #378ADD" : mm ? "1.5px solid #BA7517" : turn === "response" ? "1.5px solid #1D9E75" : "0.5px solid " + t.border, background: t.bg, color: t.text }} />
+              <button onClick={() => mm && sel.length ? merge() : send()} disabled={!input.trim() || (mm && !sel.length)}
+                style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500, borderRadius: 8, background: editId ? t.userText : newFromRef ? "#378ADD" : mm ? "#854F0B" : turn === "response" ? "#1D9E75" : t.accent, color: t.accentText, border: "none", cursor: "pointer", opacity: !input.trim() ? 0.4 : 1 }}>
+                {btnLabel}
+              </button>
+            </div>
+          </>
         )}
-
-        {/* Input */}
-        <div style={{ padding: "8px 12px", borderTop: "0.5px solid " + t.border, display: "flex", gap: 6, alignItems: "center" }}>
-          <input ref={inputRef} value={input} onChange={e => setInput(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); mm && sel.length ? merge() : send(); } }}
-            placeholder={editId ? "Edit your question..." : newFromRef ? "Start new conversation..." : mm ? "Merge instruction..." : "Message..."}
-            style={{ flex: 1, padding: "10px 12px", fontSize: 13, borderRadius: 8, border: editId ? "1.5px solid " + t.userText : newFromRef ? "1.5px solid #378ADD" : mm ? "1.5px solid #BA7517" : "0.5px solid " + t.border, background: t.bg, color: t.text }} />
-          <button onClick={() => mm && sel.length ? merge() : send()} disabled={thinking || !input.trim() || (mm && !sel.length)}
-            style={{ padding: "10px 16px", fontSize: 13, fontWeight: 500, borderRadius: 8, background: editId ? t.userText : newFromRef ? "#378ADD" : mm ? "#854F0B" : t.accent, color: t.accentText, border: "none", cursor: "pointer", opacity: thinking || !input.trim() ? 0.4 : 1 }}>
-            {editId ? "Edit" : newFromRef ? "New" : mm ? "Merge" : "Send"}
-          </button>
-        </div>
       </div>
 
       {/* RIGHT: Graph */}
-      {graph && commits.length > 0 && (
+      {!timelineView && graph && commits.length > 0 && (
         <div style={{ width: graphW, minWidth: 200, maxWidth: 600, display: "flex", flexDirection: "column", borderLeft: "0.5px solid " + t.border, background: t.graphBg, overflow: "hidden", position: "relative" }}>
           <div style={{ position: "absolute", left: -3, top: 0, bottom: 0, width: 6, cursor: "col-resize", zIndex: 10 }}
             onMouseDown={e => {
