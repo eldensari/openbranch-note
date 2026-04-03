@@ -118,8 +118,105 @@ function isSameDay(d1, d2) {
 function formatDate(d) {
   return d.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
 }
-function formatTime(iso) {
-  return new Date(iso).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+function formatDateLabel(d) {
+  return d.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+}
+function formatHour(h) {
+  if (h === 0 || h === 12) return (h === 0 ? "12" : "12") + (h < 12 ? " AM" : " PM");
+  return (h > 12 ? h - 12 : h) + (h < 12 ? " AM" : " PM");
+}
+
+function parseShowDate(input) {
+  const msg = input.trim();
+  if (msg === "/show today") {
+    const d = new Date(); d.setHours(0,0,0,0);
+    return { date: d, label: "Today" };
+  }
+  if (msg === "/show yesterday") {
+    const d = new Date(); d.setDate(d.getDate() - 1); d.setHours(0,0,0,0);
+    return { date: d, label: "Yesterday" };
+  }
+  const m = msg.match(/^\/show\s+(\d{6})$/);
+  if (m) {
+    const s = m[1];
+    const mm = parseInt(s.slice(0,2),10), dd = parseInt(s.slice(2,4),10), yy = parseInt(s.slice(4,6),10);
+    if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return { error: "Invalid date: month must be 01-12, day 01-31" };
+    const d = new Date(2000 + yy, mm - 1, dd);
+    if (d.getMonth() !== mm - 1 || d.getDate() !== dd) return { error: "Invalid date: " + s };
+    d.setHours(0,0,0,0);
+    return { date: d, label: formatDateLabel(d) };
+  }
+  if (msg.startsWith("/show")) return { error: "Usage: /show today, /show yesterday, or /show MMDDYY" };
+  return null;
+}
+
+function detectSessions(conv, targetDate) {
+  const cms = conv.commits || [];
+  if (!cms.length) return [];
+  const dayStart = targetDate.getTime();
+  const dayEnd = dayStart + 86400000;
+
+  // Collect all timestamps for this conversation on target date
+  const allTs = [];
+  cms.forEach(cm => {
+    if (cm.ts) allTs.push(cm.ts);
+    if (cm.responseTs) allTs.push(cm.responseTs);
+  });
+  allTs.sort((a, b) => a - b);
+  const dayTs = allTs.filter(ts => ts >= dayStart && ts < dayEnd);
+  if (!dayTs.length) return [];
+
+  // Split into sessions (30min gap)
+  const sessions = [];
+  let sessionStart = dayTs[0];
+  let prev = dayTs[0];
+  for (let i = 1; i < dayTs.length; i++) {
+    if (dayTs[i] - prev >= 30 * 60 * 1000) {
+      sessions.push({ startTime: sessionStart, isPrimary: sessions.length === 0 });
+      sessionStart = dayTs[i];
+    }
+    prev = dayTs[i];
+  }
+  sessions.push({ startTime: sessionStart, isPrimary: sessions.length === 0 });
+  return sessions;
+}
+
+/* ═══════ MINI GRAPH ═══════ */
+function renderMiniGraph(commits, branchNames) {
+  if (!commits.length) return null;
+  const maxNodes = 8;
+  const sorted = [...commits].sort((a, b) => a.ts - b.ts);
+  const shown = sorted.length > maxNodes ? sorted.slice(0, maxNodes) : sorted;
+  const names = branchNames.length ? branchNames : ["main"];
+  const nR = 2, lW = 8, rH = 6, pL = 4;
+  const h = shown.length * rH + 4;
+  const w = 48;
+
+  const pos = {};
+  shown.forEach((cm, i) => {
+    const lane = Math.max(0, names.indexOf(cm.branch));
+    pos[cm.id] = { x: pL + lane * lW + nR, y: 2 + i * rH + nR };
+  });
+
+  return (
+    <svg width={w} height={Math.min(h, 28)} viewBox={`0 0 ${w} ${Math.min(h, 28)}`} style={{ display: "block", flexShrink: 0 }}>
+      {shown.map(cm => {
+        const to = pos[cm.id]; if (!to) return null;
+        if (!cm.parentId) return null;
+        const fr = pos[cm.parentId]; if (!fr) return null;
+        const col = bCol(names, cm.branch);
+        if (fr.x === to.x) return <line key={"e" + cm.id} x1={fr.x} y1={fr.y + nR} x2={to.x} y2={to.y - nR} stroke={col} strokeWidth="1" opacity="0.4" />;
+        const mY = (fr.y + to.y) / 2;
+        return <path key={"e" + cm.id} d={`M${fr.x} ${fr.y + nR} C${fr.x} ${mY} ${to.x} ${mY} ${to.x} ${to.y - nR}`} fill="none" stroke={col} strokeWidth="1" opacity="0.4" />;
+      })}
+      {shown.map(cm => {
+        const p = pos[cm.id]; if (!p) return null;
+        const col = bCol(names, cm.branch);
+        const filled = !!cm.response;
+        return <circle key={"n" + cm.id} cx={p.x} cy={p.y} r={nR} fill={filled ? col : "none"} stroke={col} strokeWidth="1" />;
+      })}
+    </svg>
+  );
 }
 
 /* ═══════ GIT GRAPH ═══════ */
@@ -300,74 +397,202 @@ function Graph({ commits, headId, activeBranch, names, onCheckout, onEdit, onNew
 
 /* ═══════ TIMELINE VIEW ═══════ */
 function TimelineView({ date, label, convs, onGoToConv, onBack, t }) {
-  const targetDate = date;
-  const filtered = convs.filter(cv => {
-    if (!cv.u) return false;
-    return isSameDay(new Date(cv.u), targetDate);
-  }).sort((a, b) => (a.u || "").localeCompare(b.u || ""));
+  const [hovCard, setHovCard] = useState(null);
+  const scrollRef = useRef(null);
+  const dayStart = date.getTime();
+  const dayEnd = dayStart + 86400000;
+
+  // Build cards from all conversations with sessions on this day
+  const cards = [];
+  let colorIdx = 0;
+  convs.forEach(cv => {
+    const sessions = detectSessions(cv, date);
+    if (!sessions.length) return;
+    const color = BC[colorIdx % BC.length];
+    const names = bNames(cv.commits || []);
+    const lastPrompt = (cv.commits || []).filter(c => c.prompt).slice(-1)[0]?.prompt || "";
+    sessions.forEach(s => {
+      cards.push({
+        key: cv.id + "_" + s.startTime,
+        convId: cv.id,
+        conv: cv,
+        startTime: s.startTime,
+        isPrimary: s.isPrimary,
+        color,
+        names,
+        lastPrompt,
+      });
+    });
+    colorIdx++;
+  });
+
+  cards.sort((a, b) => a.startTime - b.startTime);
+
+  // 12 AM – 11 PM range (0–23), but hide the 12 AM label
+  const minHour = 0, maxHour = 23;
+  const hourPx = 100;
+  const totalH = 24 * hourPx;
+
+  // Find first activity hour for auto-scroll
+  let firstActivityHour = -1;
+  if (cards.length) {
+    firstActivityHour = new Date(cards[0].startTime).getHours();
+  }
+
+  // Auto-scroll to first activity
+  useEffect(() => {
+    if (scrollRef.current && firstActivityHour >= 0) {
+      const scrollTo = Math.max(0, firstActivityHour * hourPx - 20);
+      scrollRef.current.scrollTop = scrollTo;
+    }
+  }, [firstActivityHour]);
+
+  // Position cards
+  const PRIMARY_H = 56, CONTINUED_H = 34;
+  const positioned = cards.map(c => {
+    const d = new Date(c.startTime);
+    const minutesSinceStart = d.getHours() * 60 + d.getMinutes();
+    const top = (minutesSinceStart / 60) * hourPx;
+    const h = c.isPrimary ? PRIMARY_H : CONTINUED_H;
+    return { ...c, top, height: h };
+  });
+
+  // Overlap resolution
+  const groups = [];
+  const used = new Set();
+  for (let i = 0; i < positioned.length; i++) {
+    if (used.has(i)) continue;
+    const group = [i];
+    used.add(i);
+    let groupBottom = positioned[i].top + positioned[i].height;
+    for (let j = i + 1; j < positioned.length; j++) {
+      if (used.has(j)) continue;
+      if (positioned[j].top < groupBottom) {
+        group.push(j);
+        used.add(j);
+        groupBottom = Math.max(groupBottom, positioned[j].top + positioned[j].height);
+      }
+    }
+    groups.push(group);
+  }
+  const layout = new Array(positioned.length);
+  groups.forEach(group => {
+    const n = group.length;
+    group.forEach((idx, i) => {
+      layout[idx] = { widthPct: 100 / n, leftPct: (100 / n) * i };
+    });
+  });
+
+  const headerLabel = (label === "Today" || label === "Yesterday")
+    ? label + " \u2014 " + formatDate(date)
+    : label;
 
   return (
-    <div style={{ flex: 1, overflowY: "auto", padding: "14px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+    <div style={{ flex: 1, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+      {/* Header */}
+      <div style={{ padding: "12px 16px", borderBottom: "0.5px solid " + t.border, display: "flex", alignItems: "center", gap: 10 }}>
         <button onClick={onBack} style={{ fontSize: 12, padding: "4px 10px", borderRadius: 6, border: "0.5px solid " + t.border, background: "transparent", color: t.textSub, cursor: "pointer" }}>
           &larr; Back
         </button>
-        <div style={{ fontSize: 18, fontWeight: 700, color: t.text }}>
-          {"\uD83D\uDCC5"} {label === "today" ? "Today" : "Yesterday"} &mdash; {formatDate(targetDate)}
-        </div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: t.text }}>{headerLabel}</div>
       </div>
 
-      {filtered.length === 0 && (
-        <div style={{ textAlign: "center", padding: 60, color: t.textMuted, fontSize: 14 }}>
-          No conversations found for this date.
+      {cards.length === 0 ? (
+        <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: t.textMuted, fontSize: 14 }}>
+          No conversations on this date
         </div>
-      )}
+      ) : (
+        <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", padding: "10px 16px 10px 70px" }}>
+          <div style={{ position: "relative", height: totalH }}>
+            {/* Hour lines + labels */}
+            {Array.from({ length: maxHour - minHour + 1 }, (_, i) => {
+              const h = minHour + i;
+              const y = i * hourPx;
+              if (h === 0) return null;
+              return (
+                <div key={h}>
+                  <div style={{ position: "absolute", left: -60, top: y - 7, fontSize: 10, color: t.textMuted, width: 50, textAlign: "right", fontFamily: "monospace" }}>
+                    {formatHour(h)}
+                  </div>
+                  <div style={{ position: "absolute", left: 0, right: 0, top: y, height: 1, background: t.border, opacity: 0.5 }} />
+                </div>
+              );
+            })}
 
-      {filtered.map((cv, idx) => {
-        const mainThread = getThread(cv.commits || [], cv.headId);
-        const names = bNames(cv.commits || []);
-        return (
-          <div key={cv.id} style={{ marginBottom: 30 }}>
-            {idx > 0 && <div style={{ borderTop: "1px dashed " + t.border, margin: "20px 0" }} />}
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-              <span onClick={() => onGoToConv(cv)} style={{ fontSize: 15, fontWeight: 600, color: t.userText, cursor: "pointer", textDecoration: "underline" }}>
-                {cv.title || "Untitled"}
-              </span>
-              <span style={{ fontSize: 10, color: t.textMuted }}>{formatTime(cv.u)}</span>
-              <span style={{ fontSize: 9, color: t.textMuted, fontFamily: "monospace" }}>{names.length}b</span>
-            </div>
-
-            {/* Chat history */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12, paddingLeft: 10, borderLeft: "2px solid " + t.border }}>
-              {mainThread.map(cm => {
-                const isMrg = (cm.mergeIds || []).length > 0;
+            {/* Cards */}
+            {positioned.map((c, idx) => {
+              const l = layout[idx];
+              const isHov = hovCard === c.key;
+              if (c.isPrimary) {
                 return (
-                  <div key={cm.id} style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                    <div style={{ alignSelf: "flex-end", maxWidth: "80%" }}>
-                      <div style={{ padding: "8px 12px", borderRadius: 10, fontSize: 12, lineHeight: 1.6, whiteSpace: "pre-wrap", background: isMrg ? t.mergeBubble : t.userBubble, color: isMrg ? t.mergeText : t.userText }}>
-                        {isMrg && <div style={{ fontSize: 8, fontWeight: 600, marginBottom: 3, color: "#BA7517" }}>MERGE</div>}
-                        {cm.prompt}
+                  <div key={c.key}
+                    onClick={() => onGoToConv(c.conv)}
+                    onMouseEnter={() => setHovCard(c.key)}
+                    onMouseLeave={() => setHovCard(null)}
+                    style={{
+                      position: "absolute", top: c.top, height: c.height,
+                      left: l.leftPct + "%", width: l.widthPct + "%",
+                      boxSizing: "border-box", paddingRight: 6,
+                      cursor: "pointer",
+                    }}>
+                    <div style={{
+                      height: "100%", display: "flex", alignItems: "center", gap: 8,
+                      padding: "10px 14px 10px 0",
+                      background: t.bg, borderRadius: "0 8px 8px 0",
+                      borderLeft: "3px solid " + c.color,
+                      border: "0.5px solid " + (isHov ? t.textMuted : t.border),
+                      borderLeftWidth: 3, borderLeftColor: c.color,
+                      transition: "border-color 0.15s",
+                    }}>
+                      <div style={{ marginLeft: 8, flexShrink: 0 }}>
+                        {renderMiniGraph(c.conv.commits || [], c.names)}
                       </div>
-                    </div>
-                    <div style={{ alignSelf: "flex-start", maxWidth: "80%", padding: "8px 12px", borderRadius: 10, fontSize: 12, lineHeight: 1.6, background: t.aiBubble, color: t.aiText }}>
-                      {cm.response ? renderMd(cm.response, t) : <span style={{ color: t.textMuted, fontStyle: "italic" }}>waiting for response...</span>}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: t.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {c.conv.title || "Untitled"}
+                        </div>
+                        <div style={{ fontSize: 11, color: t.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 2 }}>
+                          {c.lastPrompt}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 );
-              })}
-            </div>
-
-            {/* Inline graph */}
-            {(cv.commits || []).length > 0 && (
-              <div style={{ border: "0.5px solid " + t.border, borderRadius: 8, background: t.graphBg, maxHeight: 300, overflow: "hidden" }}>
-                <Graph commits={cv.commits || []} headId={cv.headId} activeBranch={cv.branch || "main"} names={names}
-                  onCheckout={() => {}} onEdit={() => {}} onNew={() => {}} onDelete={() => {}} mergeMode={false} selected={[]} onToggleSel={() => {}}
-                  parentRef={cv.parentRef} onGoToParent={() => {}} childRefs={[]} onGoToChild={() => {}} hoveredCid={null} panelW={400} t={t} readOnly />
-              </div>
-            )}
+              }
+              // Continued card
+              return (
+                <div key={c.key}
+                  onClick={() => onGoToConv(c.conv)}
+                  onMouseEnter={() => setHovCard(c.key)}
+                  onMouseLeave={() => setHovCard(null)}
+                  style={{
+                    position: "absolute", top: c.top, height: c.height,
+                    left: l.leftPct + "%", width: l.widthPct + "%",
+                    boxSizing: "border-box", paddingRight: 6,
+                    cursor: "pointer", opacity: 0.55,
+                  }}>
+                  <div style={{
+                    height: "100%", display: "flex", alignItems: "center", gap: 8,
+                    padding: "6px 14px 6px 0",
+                    background: t.bg, borderRadius: "0 6px 6px 0",
+                    borderLeft: "3px solid " + c.color,
+                    border: "0.5px solid " + (isHov ? t.textMuted : t.border),
+                    borderLeftWidth: 3, borderLeftColor: c.color,
+                    transition: "border-color 0.15s",
+                  }}>
+                    <div style={{ marginLeft: 8, flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 12, fontWeight: 500, color: c.color, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {c.conv.title || "Untitled"}
+                      </span>
+                      <span style={{ fontSize: 10, color: t.textMuted, flexShrink: 0 }}>continued</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        );
-      })}
+        </div>
+      )}
     </div>
   );
 }
@@ -395,7 +620,7 @@ export default function App() {
   const [chatMenu, setChatMenu] = useState(null);
   const [renamingId, setRenamingId] = useState(null);
   const [renameVal, setRenameVal] = useState("");
-  const [timelineView, setTimelineView] = useState(null); // null | { date: Date, label: "today" | "yesterday" }
+  const [timelineView, setTimelineView] = useState(null); // null | { date: Date, label: string }
 
   // Turn-based state: "prompt" or "response"
   const [turn, setTurn] = useState("prompt");
@@ -478,20 +703,19 @@ export default function App() {
     const msg = input.trim();
 
     // Check for /show commands
-    if (msg === "/show today") {
+    if (msg.startsWith("/show")) {
       setInput("");
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      setTimelineView({ date: today, label: "today" });
-      return;
-    }
-    if (msg === "/show yesterday") {
-      setInput("");
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      yesterday.setHours(0, 0, 0, 0);
-      setTimelineView({ date: yesterday, label: "yesterday" });
-      return;
+      const parsed = parseShowDate(msg);
+      if (!parsed) { /* not a /show command, fall through */ }
+      else if (parsed.error) {
+        // Show error as a commit in current conversation
+        const errCm = mkCommit(headId, msg, parsed.error, branch);
+        const nc = [...cRef.current, errCm]; setCommits(nc); cRef.current = nc; setHeadId(errCm.id);
+        return;
+      } else {
+        setTimelineView({ date: parsed.date, label: parsed.label });
+        return;
+      }
     }
 
     setInput("");
@@ -739,7 +963,7 @@ export default function App() {
                   <div style={{ textAlign: "center", maxWidth: 520 }}>
                     <div style={{ fontSize: 28, fontWeight: 700, marginBottom: 6, letterSpacing: "-0.5px", color: t.text, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}><img src={herbIcon} alt="OpenBranch Note" style={{ width: 36, height: 36 }} /> OpenBranch Note</div>
                     <div style={{ fontSize: 13, color: t.textSub, marginBottom: 24 }}>Manual conversation logger with branching visualization.</div>
-                    <div style={{ fontSize: 11, color: t.textMuted }}>Type <code style={{ background: t.inlineCode, padding: "1px 4px", borderRadius: 3, fontSize: "0.9em" }}>/show today</code> or <code style={{ background: t.inlineCode, padding: "1px 4px", borderRadius: 3, fontSize: "0.9em" }}>/show yesterday</code> to review your timeline.</div>
+                    <div style={{ fontSize: 11, color: t.textMuted }}>Type <code style={{ background: t.inlineCode, padding: "1px 4px", borderRadius: 3, fontSize: "0.9em" }}>/show today</code>, <code style={{ background: t.inlineCode, padding: "1px 4px", borderRadius: 3, fontSize: "0.9em" }}>/show yesterday</code>, or <code style={{ background: t.inlineCode, padding: "1px 4px", borderRadius: 3, fontSize: "0.9em" }}>/show MMDDYY</code> to review your timeline.</div>
                   </div>
                 </div>
               )}
