@@ -126,22 +126,24 @@ function formatTime(iso) {
 function Graph({ commits, headId, activeBranch, names, onCheckout, onEdit, onNew, onDelete, mergeMode, selected, onToggleSel, parentRef, onGoToParent, childRefs, onGoToChild, hoveredCid, panelW, t, readOnly }) {
   const [ctx, setCtx] = useState(null);
   const hasParent = !!parentRef;
-  const sorted = [...commits].sort((a, b) => a.ts - b.ts);
 
-  const vnodes = [];
+  // Build vnodes with individual timestamps, then sort chronologically
+  const unsorted = [];
   if (hasParent) {
-    vnodes.push({ vid: "ghost", cid: null, type: "ghost", branch: "main", label: parentRef.promptSummary || "Parent conversation", parentVid: null, mergeVids: [] });
+    unsorted.push({ vid: "ghost", cid: null, type: "ghost", branch: "main", label: parentRef.promptSummary || "Parent conversation", parentVid: null, mergeVids: [], _ts: 0 });
   }
-  sorted.forEach(cm => {
-    vnodes.push({ vid: cm.id + "_p", cid: cm.id, type: "p", branch: cm.branch, label: cm.prompt || "", parentVid: cm.parentId ? cm.parentId + "_r" : (hasParent ? "ghost" : null), mergeVids: (cm.mergeIds || []).map(m => m + "_r") });
+  commits.forEach(cm => {
+    unsorted.push({ vid: cm.id + "_p", cid: cm.id, type: "p", branch: cm.branch, label: cm.prompt || "", parentVid: cm.parentId ? cm.parentId + "_r" : (hasParent ? "ghost" : null), mergeVids: (cm.mergeIds || []).map(m => m + "_r"), _ts: cm.ts });
+    const rTs = cm.responseTs || (cm.ts + 1);
     const aiSum = cm.response ? cm.response.replace(/\*\*/g, "").replace(/\n/g, " ").trim() : "...";
-    vnodes.push({ vid: cm.id + "_r", cid: cm.id, type: "r", branch: cm.branch, label: aiSum, parentVid: cm.id + "_p", mergeVids: [] });
+    unsorted.push({ vid: cm.id + "_r", cid: cm.id, type: "r", branch: cm.branch, label: aiSum, parentVid: cm.id + "_p", mergeVids: [], _ts: rTs });
     if (childRefs) {
       childRefs.filter(cr => cr.commitId === cm.id).forEach(cr => {
-        vnodes.push({ vid: "child_" + cr.convId, cid: null, type: "child", branch: cm.branch, label: cr.convTitle, parentVid: cm.id + "_r", mergeVids: [], childConvId: cr.convId });
+        unsorted.push({ vid: "child_" + cr.convId, cid: null, type: "child", branch: cm.branch, label: cr.convTitle, parentVid: cm.id + "_r", mergeVids: [], childConvId: cr.convId, _ts: rTs + 1 });
       });
     }
   });
+  const vnodes = unsorted.sort((a, b) => a._ts - b._ts);
 
   if (!vnodes.length) return <div style={{ padding: 20, textAlign: "center", color: t.textMuted, fontSize: 12 }}>Start a conversation</div>;
 
@@ -503,7 +505,7 @@ export default function App() {
       // Find the last commit (the one with empty response) and fill it
       const lastCommit = cRef.current.find(c => c.id === headId);
       if (lastCommit) {
-        const nc = cRef.current.map(c => c.id === headId ? { ...c, response: msg } : c);
+        const nc = cRef.current.map(c => c.id === headId ? { ...c, response: msg, responseTs: Date.now() } : c);
         setCommits(nc); cRef.current = nc;
         save(null, nc, headId, br);
       }
@@ -569,7 +571,7 @@ export default function App() {
       // Fill the merge commit's response
       const lastCommit = cRef.current.find(c => c.id === headId);
       if (lastCommit) {
-        const nc = cRef.current.map(c => c.id === headId ? { ...c, response: msg } : c);
+        const nc = cRef.current.map(c => c.id === headId ? { ...c, response: msg, responseTs: Date.now() } : c);
         setCommits(nc); cRef.current = nc;
         save(null, nc, headId, branch);
       }
