@@ -218,6 +218,33 @@ function Graph({ commits, headId, activeBranch, names, onCheckout, onEdit, onNew
     pos[n.vid] = { x: pL + lane * lW, y: 18 + i * rH };
   });
 
+  /* ── Branch path dimming ── */
+  const pathCids = new Set();
+  const isMainActive = activeBranch === names[0];
+  if (isMainActive) {
+    commits.forEach(c => pathCids.add(c.id));
+  } else {
+    // Add all non-merge commits on the active branch
+    commits.filter(c => c.branch === activeBranch && !(c.mergeIds?.length))
+      .forEach(c => pathCids.add(c.id));
+    // Trace ancestors from branch's first commit back to root
+    const firstOnBranch = commits.find(c => c.branch === activeBranch &&
+      (!c.parentId || commits.find(p => p.id === c.parentId)?.branch !== activeBranch));
+    if (firstOnBranch) {
+      let pid = firstOnBranch.parentId;
+      while (pid) {
+        const p = commits.find(c => c.id === pid);
+        if (!p) break;
+        pathCids.add(p.id);
+        pid = p.parentId;
+      }
+    }
+  }
+  const vnodeMap = {}; vnodes.forEach(v => { vnodeMap[v.vid] = v; });
+  const cidOnPath = cid => isMainActive || pathCids.has(cid);
+  const vidOnPath = vid => { const v = vnodeMap[vid]; return !v || v.type === "ghost" || cidOnPath(v.cid); };
+  const dimTrans = "opacity 0.2s ease";
+
   return (
     <div className="graph-scroll" style={{ overflowY: "auto", overflowX: "hidden", flex: 1, position: "relative" }} onClick={() => setCtx(null)}>
       {/* Branch tabs */}
@@ -237,7 +264,8 @@ function Graph({ commits, headId, activeBranch, names, onCheckout, onEdit, onNew
           if (!bv.length) return null;
           const p1 = pos[bv[0].vid], p2 = pos[bv[bv.length - 1].vid];
           if (!p1 || !p2) return null;
-          return <line key={b} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={bCol(names, b)} strokeWidth="2" opacity="0.25" />;
+          const spineOn = isMainActive || bv.some(nd => pathCids.has(nd.cid));
+          return <line key={b} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={bCol(names, b)} strokeWidth="2" opacity={spineOn ? 0.25 : 0.12} style={{ transition: dimTrans }} />;
         })}
 
         {vnodes.map(n => {
@@ -249,11 +277,13 @@ function Graph({ commits, headId, activeBranch, names, onCheckout, onEdit, onNew
             const col = isGhostEdge ? t.textMuted : bCol(names, n.branch);
             const isMrg = n.mergeVids?.includes(pid);
             const dash = (isMrg || isGhostEdge) ? "4 3" : "none";
-            const op = (isMrg || isGhostEdge) ? 0.3 : 0.35;
+            const baseOp = (isMrg || isGhostEdge) ? 0.3 : 0.35;
+            const edgeOn = vidOnPath(n.vid) && vidOnPath(pid);
+            const op = edgeOn ? baseOp : 0.12;
             const sw = (isMrg || isGhostEdge) ? 1.5 : 2;
-            if (fr.x === to.x) return <line key={pid + "-" + n.vid} x1={fr.x} y1={fr.y + nR + 1} x2={to.x} y2={to.y - nR - 1} stroke={col} strokeWidth={sw} opacity={op} strokeDasharray={dash} />;
+            if (fr.x === to.x) return <line key={pid + "-" + n.vid} x1={fr.x} y1={fr.y + nR + 1} x2={to.x} y2={to.y - nR - 1} stroke={col} strokeWidth={sw} opacity={op} strokeDasharray={dash} style={{ transition: dimTrans }} />;
             const mY = (fr.y + to.y) / 2;
-            return <path key={pid + "-" + n.vid} d={`M${fr.x} ${fr.y + nR + 1} C${fr.x} ${mY} ${to.x} ${mY} ${to.x} ${to.y - nR - 1}`} fill="none" stroke={col} strokeWidth={sw} opacity={op} strokeDasharray={dash} />;
+            return <path key={pid + "-" + n.vid} d={`M${fr.x} ${fr.y + nR + 1} C${fr.x} ${mY} ${to.x} ${mY} ${to.x} ${to.y - nR - 1}`} fill="none" stroke={col} strokeWidth={sw} opacity={op} strokeDasharray={dash} style={{ transition: dimTrans }} />;
           });
         })}
 
@@ -275,8 +305,10 @@ function Graph({ commits, headId, activeBranch, names, onCheckout, onEdit, onNew
           }
 
           if (n.type === "child") {
+            const parentCid = n.parentVid?.replace(/_[pr]$/, "");
+            const nodeOn = isMainActive || (parentCid && pathCids.has(parentCid));
             return (
-              <g key={n.vid} style={{ cursor: readOnly ? "default" : "pointer" }} onClick={e => { e.stopPropagation(); if (!readOnly) onGoToChild(n.childConvId); }}>
+              <g key={n.vid} style={{ cursor: readOnly ? "default" : "pointer", opacity: nodeOn ? 1 : 0.12, transition: dimTrans }} onClick={e => { e.stopPropagation(); if (!readOnly) onGoToChild(n.childConvId); }}>
                 <circle cx={p.x} cy={p.y} r={5} fill="none" stroke={t.textMuted} strokeWidth="1.5" strokeDasharray="3 2" />
                 <text x={lX} y={p.y - 2} fontSize="9" fill={t.textMuted} fontStyle="italic" style={{ fontFamily: "system-ui" }}>
                   {"\u2198 " + trunc(n.label, maxChars - 2)}
@@ -296,9 +328,10 @@ function Graph({ commits, headId, activeBranch, names, onCheckout, onEdit, onNew
           const sel = selected?.includes(n.cid);
           const hov = hoveredCid === n.cid;
           const r = cur ? 5 : (isMrg ? 5 : nR);
+          const nodeOn = cidOnPath(n.cid);
 
           return (
-            <g key={n.vid} style={{ cursor: readOnly ? "default" : "pointer" }}
+            <g key={n.vid} style={{ cursor: readOnly ? "default" : "pointer", opacity: nodeOn ? 1 : 0.12, transition: dimTrans }}
               onClick={e => { e.stopPropagation(); if (readOnly) return; setCtx(null); if (mergeMode) { onToggleSel(n.cid); return; } if (cm) onCheckout(cm.id, cm.branch); }}
               onContextMenu={e => { if (readOnly) return; e.preventDefault(); e.stopPropagation(); setCtx({ x: e.clientX, y: e.clientY, cid: n.cid, isPrompt: isPr }); }}>
               {(cur || sel || hov) && <circle cx={p.x} cy={p.y} r={hov ? 11 : 9} fill={sel ? "#BA7517" : col} opacity={hov ? 0.25 : 0.15} />}
